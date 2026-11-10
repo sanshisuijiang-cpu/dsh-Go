@@ -84,7 +84,7 @@ internal object TreeCapture {
         )
     }
 
-    private class State(val deadline: Long, val typedTransitions: Long?, val typedEvents: Long?) {
+    private class State(val deadline: Long, val typedTransitions: Long?, val typedEvents: Long?, val screen: Box) {
         val natives = ArrayList<AccessibilityNodeInfo>(256)
         var count = 0
         var typedFresh = true
@@ -95,7 +95,7 @@ internal object TreeCapture {
     }
 
     fun capture(service: AccessibilityService, screen: Box, ownPackage: String, budgetMs: Long, typedTransitions: Long? = null, typedEvents: Long? = null): Capture {
-        val st = State(SystemClock.uptimeMillis() + budgetMs, typedTransitions, typedEvents)
+        val st = State(SystemClock.uptimeMillis() + budgetMs, typedTransitions, typedEvents, screen)
         val all = try { service.windows } catch (_: Throwable) { null }
         val sorted = all.orEmpty().sortedByDescending { it.layer }
         // Scan every window before the content loop can stop at an opaque app window.
@@ -275,6 +275,11 @@ internal object TreeCapture {
         if (!node.isVisibleToUser) { release(node); return null }
         node.getBoundsInScreen(st.rect)
         val bounds = Box(st.rect.left, st.rect.top, st.rect.right, st.rect.bottom)
+        // Physical boundary filter: a zero-sized node has nothing to read or tap, and a
+        // node that does not touch the screen at all (clipped scroll content, stale
+        // layout) is not part of what the person sees. Partially on-screen nodes keep
+        // their true absolute bounds.
+        if (bounds.isEmpty || bounds.intersect(st.screen).isEmpty) { release(node); return null }
         val ref = st.natives.size
         st.natives += node
         st.count++

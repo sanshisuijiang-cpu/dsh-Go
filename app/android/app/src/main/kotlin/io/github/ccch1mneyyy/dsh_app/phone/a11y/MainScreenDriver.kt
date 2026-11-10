@@ -1473,6 +1473,10 @@ internal class MainScreenDriver(private val service: PhoneA11yService, private v
                 screenWidth = cap.screen.width, screenHeight = cap.screen.height, keyboardShown = cap.keyboardShown,
                 windows = cap.windows, detail = detail, previousKeys = previous, notes = notes.map { it.second },
                 unreadable = cap.unreadableWindowTitle != null,
+                // The model reads and taps by absolute coordinates: every element line carries
+                // Center/Bounds, so no detail round-trip is needed. The extra ~40 chars per
+                // line widen the page budget to keep the visible element count stable.
+                coordinates = true, charBudget = 3600,
             ),
         )
         var formatted = format(notes)

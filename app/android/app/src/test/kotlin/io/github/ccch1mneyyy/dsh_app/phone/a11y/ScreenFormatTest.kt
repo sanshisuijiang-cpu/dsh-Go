@@ -94,6 +94,31 @@ class ScreenFormatTest {
         assertTrue(poor.text.contains(ScreenFormat.POOR_TREE_NOTE))
     }
 
+    @Test fun offScreenAndZeroSizedNodesArePrunedFromTheText() {
+        val bounds = Box(0, 0, 400, 800)
+        val screen = ScreenFormat.format(ScreenInput("s1", "Example", "example.app", 400, 800, false,
+            listOf(UiWindow(1, WindowKind.APP, "example.app", null, bounds, UiNode(bounds = bounds, children = listOf(
+                UiNode(text = "屏外节点", bounds = Box(0, 800, 300, 900)), // below the visible screen
+                UiNode(text = "零尺寸节点", bounds = Box(10, 10, 10, 10)), // width = height = 0
+                UiNode(text = "正常节点", bounds = Box(0, 100, 300, 150)),
+            ))))))
+        assertFalse(screen.text.contains("屏外节点"))
+        assertFalse(screen.text.contains("零尺寸节点"))
+        assertTrue(screen.text.contains("正常节点"))
+    }
+
+    @Test fun coordinateModeRendersCenterAndBoundsOnEveryElementLine() {
+        val bounds = Box(0, 0, 400, 800)
+        val screen = ScreenFormat.format(ScreenInput("s1", "Example", "example.app", 400, 800, false,
+            listOf(UiWindow(1, WindowKind.APP, "example.app", null, bounds,
+                UiNode(bounds = bounds, children = listOf(
+                    UiNode(className = "android.widget.Button", text = "继续", clickable = true,
+                        bounds = Box(0, 100, 300, 150))))))),
+            coordinates = true)
+        assertTrue(screen.text.contains("[1] 按钮 继续 | Center: (150, 125) | Bounds: [0,100][300,150]"))
+        assertEquals(Box(0, 100, 300, 150), screen.elements.single().bounds)
+    }
+
     @Test fun screenshotMasksIncludeFieldsOutsideTheTextBudget() {
         val frame = Box(0, 0, 400, 800)
         val passwordBox = Box(0, 500, 300, 550)

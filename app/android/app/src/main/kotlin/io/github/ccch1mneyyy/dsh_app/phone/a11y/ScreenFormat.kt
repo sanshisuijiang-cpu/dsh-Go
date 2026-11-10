@@ -31,6 +31,8 @@ class ScreenInput(
     /** Top-most first; the last one is the main window, the others render as 弹窗. */
     val windows: List<UiWindow>,
     val detail: Boolean = false,
+    /** Render `| Center: (x, y) | Bounds: [l,t][r,b]` on every element line. */
+    val coordinates: Boolean = false,
     /** Element keys of the previous snapshot of the same app (`+` marks); null = no marks. */
     val previousKeys: Set<String>? = null,
     /** Extra lines under the header (protected page, secure window …). */
@@ -118,17 +120,18 @@ object ScreenFormat {
 
     fun format(input: ScreenInput): FormattedScreen {
         val textNodes = input.windows.sumOf { w -> w.root?.let(::countText) ?: 0 }
+        val screen = Box(0, 0, input.screenWidth, input.screenHeight)
         val lines = mutableListOf<Line>()
         val windows = input.windows.filter { it.root != null }
         for ((index, window) in windows.withIndex()) {
-            val items = flatten(window.root!!, window, null).sortedWith(compareBy({ it.node.bounds.top }, { it.node.bounds.left }))
+            val items = flatten(window.root!!, window, null, screen).sortedWith(compareBy({ it.node.bounds.top }, { it.node.bounds.left }))
             if (index < windows.size - 1) {
                 if (items.isEmpty()) continue
                 // l10n:keep model screen format
                 lines += Line.Header(if (window.title.isNullOrBlank()) "弹窗" else "弹窗 · ${clip(clean(window.title) ?: "", 20)}")
-                emit(items, 2, lines, reserved = false, list = null, parent = null)
+                emit(items, 2, lines, reserved = false, list = null, parent = null, coordinates = input.coordinates)
             } else {
-                zones(items, input.screenHeight, lines)
+                zones(items, input.screenHeight, lines, input.coordinates)
             }
         }
 
@@ -141,7 +144,7 @@ object ScreenFormat {
 
         // Page budget: keep the 底部 zone (navigation) and cut the middle with a hint.
         val headerLen = 40 + (input.appLabel?.length ?: 0) + notes.sumOf { it.length + 1 }
-        val lengths = lines.map { it.estimate(input.detail) }
+        val lengths = lines.map { it.estimate(input.detail, input.coordinates) }
         val total = headerLen + lengths.sum()
         var kept: List<Line> = lines
         var hidden = 0
@@ -191,7 +194,7 @@ object ScreenFormat {
         if (count == 0) header.append('\n').append("（没有可读的元素）")
         for (line in kept) {
             header.append('\n')
-            header.append(line.render(ids, input.detail) { item -> markNew && item.kind != ElementKind.LIST && keyOf[item] !in prev })
+            header.append(line.render(ids, input.detail, input.coordinates) { item -> markNew && item.kind != ElementKind.LIST && keyOf[item] !in prev })
         }
 
         val elements = ids.entries.sortedBy { it.value }.map { (item, id) ->
@@ -310,13 +313,15 @@ object ScreenFormat {
 
     private fun isList(n: UiNode) = n.scrollable && n.children.isNotEmpty() && !n.editable
 
-    private fun flatten(node: UiNode, window: UiWindow, parentClass: String?): List<Item> = when {
+    /** [screen] drops nodes that physically cannot be seen; null keeps everything (index paths). */
+    private fun flatten(node: UiNode, window: UiWindow, parentClass: String?, screen: Box? = null): List<Item> = when {
+        screen != null && (node.bounds.isEmpty || node.bounds.intersect(screen).isEmpty) -> emptyList()
         node.editable -> listOf(input(node, window))
-        isList(node) -> listOf(list(node, window))
-        actionable(node) -> action(node, window, parentClass)
+        isList(node) -> listOf(list(node, window, screen))
+        actionable(node) -> action(node, window, parentClass, screen)
         else -> {
             val own = clean(node.text) ?: clean(node.desc)
-            val children = node.children.flatMap { flatten(it, window, node.className) }
+            val children = node.children.flatMap { flatten(it, window, node.className, screen) }
             if (own == null) children
             else listOf(text(node, window, own, parentClass)) +
                 // l10n:keep model screen format
@@ -364,8 +369,8 @@ object ScreenFormat {
         return Item(node, window, ElementKind.INPUT, role, name, states, content, emptyList(), null, secret)
     }
 
-    private fun list(node: UiNode, window: UiWindow): Item {
-        val subs = node.children.flatMap { flatten(it, window, node.className) }
+    private fun list(node: UiNode, window: UiWindow, screen: Box?): Item {
+        val subs = node.children.flatMap { flatten(it, window, node.className, screen) }
         val horizontal = node.scroll and (Scroll.LEFT or Scroll.RIGHT) != 0 ||
             node.className.contains("Horizontal") || node.className.contains("ViewPager") ||
             (node.children.size >= 2 && node.children[0].bounds.rowOverlap(node.children[1].bounds) > 0.5 &&
@@ -388,14 +393,14 @@ object ScreenFormat {
         return Item(node, window, ElementKind.LIST, "列表", label, states, null, subs, null, false, horizontal)
     }
 
-    private fun action(node: UiNode, window: UiWindow, parentClass: String?): List<Item> {
+    private fun action(node: UiNode, window: UiWindow, parentClass: String?, screen: Box?): List<Item> {
         val texts = mutableListOf<String>()
         val subs = mutableListOf<Item>()
         fun gather(n: UiNode) {
             for (c in n.children) when {
                 c.editable -> subs += input(c, window)
-                isList(c) -> subs += list(c, window)
-                actionable(c) -> subs += action(c, window, n.className)
+                isList(c) -> subs += list(c, window, screen)
+                actionable(c) -> subs += action(c, window, n.className, screen)
                 else -> { (clean(c.text) ?: clean(c.desc))?.let { texts += it }; gather(c) }
             }
         }
@@ -490,43 +495,43 @@ object ScreenFormat {
     private sealed class Line(val indent: Int, val reserved: Boolean) {
         abstract fun items(): List<Item>
         open fun elementCount() = items().size
-        abstract fun estimate(detail: Boolean): Int
-        abstract fun render(ids: Map<Item, Int>, detail: Boolean, isNew: (Item) -> Boolean): String
+        abstract fun estimate(detail: Boolean, coordinates: Boolean): Int
+        abstract fun render(ids: Map<Item, Int>, detail: Boolean, coordinates: Boolean, isNew: (Item) -> Boolean): String
 
         class Header(val text: String, reserved: Boolean = false) : Line(0, reserved) {
             override fun items() = emptyList<Item>()
-            override fun estimate(detail: Boolean) = text.length + 1
-            override fun render(ids: Map<Item, Int>, detail: Boolean, isNew: (Item) -> Boolean) = text
+            override fun estimate(detail: Boolean, coordinates: Boolean) = text.length + 1
+            override fun render(ids: Map<Item, Int>, detail: Boolean, coordinates: Boolean, isNew: (Item) -> Boolean) = text
         }
 
         class More(indent: Int) : Line(indent, false) {
             var count = 0
             override fun items() = emptyList<Item>()
-            override fun estimate(detail: Boolean) = 30
-            override fun render(ids: Map<Item, Int>, detail: Boolean, isNew: (Item) -> Boolean) =
+            override fun estimate(detail: Boolean, coordinates: Boolean) = 30
+            override fun render(ids: Map<Item, Int>, detail: Boolean, coordinates: Boolean, isNew: (Item) -> Boolean) =
                 // l10n:keep model screen format
                 " ".repeat(indent) + "…另有 $count 项，用 collect 或 scroll"
         }
 
         class Row(indent: Int, reserved: Boolean, val row: List<Item>) : Line(indent, reserved) {
             override fun items() = row
-            override fun estimate(detail: Boolean) = indent + row.sumOf { body(it, 99, detail, false).length + 3 }
-            override fun render(ids: Map<Item, Int>, detail: Boolean, isNew: (Item) -> Boolean) =
-                " ".repeat(indent) + row.joinToString("   ") { body(it, ids[it]!!, detail, isNew(it)) }
+            override fun estimate(detail: Boolean, coordinates: Boolean) = indent + row.sumOf { body(it, 99, detail, coordinates, false).length + 3 }
+            override fun render(ids: Map<Item, Int>, detail: Boolean, coordinates: Boolean, isNew: (Item) -> Boolean) =
+                " ".repeat(indent) + row.joinToString("   ") { body(it, ids[it]!!, detail, coordinates, isNew(it)) }
         }
 
         class ListHead(indent: Int, reserved: Boolean, val list: Item) : Line(indent, reserved) {
             override fun items() = listOf(list)
-            override fun estimate(detail: Boolean) = indent + body(list, 99, detail, false).length + 1
-            override fun render(ids: Map<Item, Int>, detail: Boolean, isNew: (Item) -> Boolean) =
-                " ".repeat(indent) + body(list, ids[list]!!, detail, false)
+            override fun estimate(detail: Boolean, coordinates: Boolean) = indent + body(list, 99, detail, coordinates, false).length + 1
+            override fun render(ids: Map<Item, Int>, detail: Boolean, coordinates: Boolean, isNew: (Item) -> Boolean) =
+                " ".repeat(indent) + body(list, ids[list]!!, detail, coordinates, false)
         }
     }
 
     // l10n:keep model screen format
     private enum class Zone(val title: String) { TOP("顶部"), MIDDLE("中部"), BOTTOM("底部") }
 
-    private fun zones(items: List<Item>, screenHeight: Int, out: MutableList<Line>) {
+    private fun zones(items: List<Item>, screenHeight: Int, out: MutableList<Line>, coordinates: Boolean) {
         val h = screenHeight.coerceAtLeast(1)
         fun zone(item: Item): Zone {
             val b = item.node.bounds
@@ -537,22 +542,22 @@ object ScreenFormat {
             }
         }
         val byZone = items.groupBy(::zone)
-        byZone[Zone.TOP]?.let { out += Line.Header(Zone.TOP.title); emit(it, 2, out, false, null, null) }
+        byZone[Zone.TOP]?.let { out += Line.Header(Zone.TOP.title); emit(it, 2, out, false, null, null, coordinates) }
         byZone[Zone.MIDDLE]?.let { middle ->
             // A list in the middle stands as its own header (the example's `列表 [4] 可下滑`).
             var needHeader = true
             var run = mutableListOf<Item>()
-            fun flush() { if (run.isNotEmpty()) { if (needHeader) out += Line.Header(Zone.MIDDLE.title); needHeader = false; emit(run, 2, out, false, null, null); run = mutableListOf() } }
+            fun flush() { if (run.isNotEmpty()) { if (needHeader) out += Line.Header(Zone.MIDDLE.title); needHeader = false; emit(run, 2, out, false, null, null, coordinates); run = mutableListOf() } }
             for (item in middle) {
-                if (item.kind == ElementKind.LIST) { flush(); emit(listOf(item), 0, out, false, null, null); needHeader = true }
+                if (item.kind == ElementKind.LIST) { flush(); emit(listOf(item), 0, out, false, null, null, coordinates); needHeader = true }
                 else run += item
             }
             flush()
         }
-        byZone[Zone.BOTTOM]?.let { out += Line.Header(Zone.BOTTOM.title, reserved = true); emit(it, 2, out, true, null, null) }
+        byZone[Zone.BOTTOM]?.let { out += Line.Header(Zone.BOTTOM.title, reserved = true); emit(it, 2, out, true, null, null, coordinates) }
     }
 
-    private fun emit(items: List<Item>, indent: Int, out: MutableList<Line>, reserved: Boolean, list: Item?, parent: Item?) {
+    private fun emit(items: List<Item>, indent: Int, out: MutableList<Line>, reserved: Boolean, list: Item?, parent: Item?, coordinates: Boolean) {
         var i = 0
         while (i < items.size) {
             val item = items[i]
@@ -560,24 +565,28 @@ object ScreenFormat {
             item.parent = parent
             if (item.kind == ElementKind.LIST) {
                 out += Line.ListHead(indent, reserved, item)
-                emit(item.subs, indent + 2, out, reserved, item, null)
+                emit(item.subs, indent + 2, out, reserved, item, null, coordinates)
                 i++
                 continue
             }
             val row = mutableListOf(item)
-            var length = body(item, 99, false, false).length
-            while (i + 1 < items.size && mergeable(row.last(), items[i + 1])) {
-                val nextItem = items[i + 1]
-                val add = body(nextItem, 99, false, false).length + 3
-                if (indent + length + add > ROW_CAP) break
-                nextItem.list = list
-                nextItem.parent = parent
-                row += nextItem
-                length += add
-                i++
+            if (!coordinates) {
+                // Coordinate mode renders one element per line (each line already carries its
+                // own bounds); packed rows only apply to the coordinate-free layout.
+                var length = body(item, 99, false, coordinates, false).length
+                while (i + 1 < items.size && mergeable(row.last(), items[i + 1])) {
+                    val nextItem = items[i + 1]
+                    val add = body(nextItem, 99, false, coordinates, false).length + 3
+                    if (indent + length + add > ROW_CAP) break
+                    nextItem.list = list
+                    nextItem.parent = parent
+                    row += nextItem
+                    length += add
+                    i++
+                }
             }
             out += Line.Row(indent, reserved, row)
-            for (member in row) if (member.subs.isNotEmpty()) emit(member.subs, indent + 4, out, reserved, list, member)
+            for (member in row) if (member.subs.isNotEmpty()) emit(member.subs, indent + 4, out, reserved, list, member, coordinates)
             i++
         }
     }
@@ -588,7 +597,7 @@ object ScreenFormat {
             a.label.length <= MERGE_LABEL && b.label.length <= MERGE_LABEL &&
             a.node.bounds.rowOverlap(b.node.bounds) >= 0.5 && b.node.bounds.left >= a.node.bounds.left
 
-    private fun body(item: Item, id: Int, detail: Boolean, isNew: Boolean): String {
+    private fun body(item: Item, id: Int, detail: Boolean, coordinates: Boolean, isNew: Boolean): String {
         val sb = StringBuilder()
         if (item.kind == ElementKind.LIST) {
             // l10n:keep model screen format
@@ -611,7 +620,18 @@ object ScreenFormat {
             // l10n:keep model screen format
             if (label.isEmpty() && item.role.isNotEmpty() && item.kind == ElementKind.ITEM && item.states.isEmpty()) sb.append(" (无文字)")
         }
-        if (detail) sb.append(" @").append(item.node.bounds.centerX).append(',').append(item.node.bounds.centerY)
+        when {
+            // Absolute geometry on the line itself: the model can tap by coordinates without
+            // a detail round-trip, and every value stays the true global screen coordinate.
+            coordinates -> {
+                val b = item.node.bounds
+                // l10n:keep model screen format
+                sb.append(" | Center: (").append(b.centerX).append(", ").append(b.centerY)
+                    .append(") | Bounds: [").append(b.left).append(',').append(b.top).append("][")
+                    .append(b.right).append(',').append(b.bottom).append(']')
+            }
+            detail -> sb.append(" @").append(item.node.bounds.centerX).append(',').append(item.node.bounds.centerY)
+        }
         return sb.toString()
     }
 
