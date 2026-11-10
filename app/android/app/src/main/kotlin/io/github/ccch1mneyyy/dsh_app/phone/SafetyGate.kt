@@ -278,7 +278,7 @@ class SafetyGate(
         // Everything above is a hard rule (or one the person lifted); everything below only asks.
         val eligibleVisual = kind == WriteKind.TAP_XY && coordinate != null && eligibleCoordinate(coordinate, visual, p)
         val forceOnce = kind == WriteKind.TAP_XY && !eligibleVisual
-        if (waived(p) && !(lifted.visualGrants && forceOnce)) return Verdict.Allow
+        if (waived(p) && !(forceOnce && !lifted.visualGrants)) return Verdict.Allow
         val everyWrite = pkg != null && pkg in p.confirmEveryWritePackages
         val firstInApp = !forceOnce && !everyWrite && (pkg == null || !tasks.isApproved(pkg))
         val word = if (kind == WriteKind.TAP || kind == WriteKind.LONG_TAP || kind == WriteKind.TAP_XY) SafetyRules.sensitiveWord(target?.label, target?.viewId) else null

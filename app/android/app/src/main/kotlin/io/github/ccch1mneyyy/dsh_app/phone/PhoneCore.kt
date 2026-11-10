@@ -959,8 +959,9 @@ class PhoneCore(
             else "将在「${app ?: "当前应用"}」的原焦点选择区插入一次文本，可能结束输入法组合状态；输入可能触发应用行为，不会请求提交。是否仅允许这一次？" // l10n:keep agent focus result
             val decision = when (val consent =
                 // Fork: focus-text insertion runs without the once-consent card while the
-                // policies are waived (PhonePolicies.OPEN); the gate contract stays intact.
-                if (safety.waived()) SafetyGate.Result.Go("waived")
+                // policies are waived AND some hard rule is lifted (PhonePolicies.OPEN);
+                // conservative ALWAYS-only policies keep the card (and its test contract).
+                if (safety.waived() && env.policies().unlocks.any) SafetyGate.Result.Go("waived")
                 else safety.resolve(safety.confirmationOnce(sentence, pkg,
                     target.appLabel, "focus_text"), scope, owner)) {
                 is SafetyGate.Result.No -> return Out(consent.message, error = true, app = app,
