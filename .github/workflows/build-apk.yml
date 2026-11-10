@@ -67,6 +67,9 @@ jobs:
         run: gradle wrapper --gradle-version "$GRADLE_VERSION"
       - name: Build bundled runtime
         run: |
+          # The committed ubuntu-noble locks pin .deb versions that the mirror pool drops
+          # as newer updates land; resolve the current set fresh on every build instead.
+          rm -f runtime/locks/ubuntu-noble-*.json
           case "${{ inputs.flavor }}" in
             arm64) bash runtime/build-runtime.sh arm64-v8a ;;
             x64) bash runtime/build-runtime.sh x86_64 ;;
