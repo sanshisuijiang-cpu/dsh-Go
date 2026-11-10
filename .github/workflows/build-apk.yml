@@ -1,0 +1,86 @@
+# One-off APK builds of this fork: Actions → Build APK → Run workflow.
+# Builds the bundled Linux runtime first (Ubuntu base + Node + DSH, per ABI,
+# outputs under runtime/out which the Gradle flavors consume), then the
+# official tooling/build-apk.sh, and uploads the APKs as workflow artifacts.
+# This workflow never runs automatically: dispatch it by hand.
+name: Build APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      flavor:
+        description: "APK flavor (arm64 = phone, x64 = emulator, all = both)"
+        required: false
+        default: arm64
+        type: choice
+        options: [arm64, x64, all]
+      build-type:
+        description: "Build mode"
+        required: false
+        default: release
+        type: choice
+        options: [release, debug]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-apk
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: "3.47.7"
+  NODE_VERSION: "24.22.1"
+  GRADLE_VERSION: "9.3.1"
+  DSH_MAVEN_MIRRORS: 0 # The Aliyun mirrors are slow and unreliable from a US runner.
+
+jobs:
+  apk:
+    name: APK (${{ inputs.flavor }} · ${{ inputs.build-type }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+      - name: Flutter plugins and local.properties
+        working-directory: app
+        run: |
+          flutter pub get --enforce-lockfile
+          printf 'sdk.dir=%s\nflutter.sdk=%s\n' "$ANDROID_HOME" "$FLUTTER_ROOT" > android/local.properties
+      - name: Toolchain sanity
+        run: node --version && python3 --version && xz --version | head -1
+      # gradlew is not tracked; `flutter build apk` needs it, so generate the
+      # wrapper from the pinned gradle/wrapper/gradle-wrapper.properties first.
+      - name: Generate Gradle wrapper
+        working-directory: app/android
+        run: gradle wrapper --gradle-version "$GRADLE_VERSION"
+      - name: Build bundled runtime
+        run: |
+          case "${{ inputs.flavor }}" in
+            arm64) bash runtime/build-runtime.sh arm64-v8a ;;
+            x64) bash runtime/build-runtime.sh x86_64 ;;
+            all) bash runtime/build-runtime.sh ;;
+            *) echo "unknown flavor: ${{ inputs.flavor }}"; exit 1 ;;
+          esac
+      - name: Build APK
+        run: DSH_BETA_TOKEN_FILE= bash tooling/build-apk.sh -f "${{ inputs.flavor }}" --${{ inputs.build-type }} --keep-daemon
+      - name: Summarize
+        run: |
+          echo "### Build APK (${{ inputs.flavor }} · ${{ inputs.build-type }})" >> "$GITHUB_STEP_SUMMARY"
+          ls -lh app/build/app/outputs/flutter-apk/*.apk >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dsh-go-apk-${{ inputs.flavor }}-${{ inputs.build-type }}
+          path: app/build/app/outputs/flutter-apk/*.apk
+          if-no-files-found: error
