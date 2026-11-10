@@ -113,8 +113,8 @@ class ScreenFormatTest {
             listOf(UiWindow(1, WindowKind.APP, "example.app", null, bounds,
                 UiNode(bounds = bounds, children = listOf(
                     UiNode(className = "android.widget.Button", text = "继续", clickable = true,
-                        bounds = Box(0, 100, 300, 150))))))),
-            coordinates = true)
+                        bounds = Box(0, 100, 300, 150)))))),
+            coordinates = true))
         assertTrue(screen.text.contains("[1] 按钮 继续 | Center: (150, 125) | Bounds: [0,100][300,150]"))
         assertEquals(Box(0, 100, 300, 150), screen.elements.single().bounds)
     }
