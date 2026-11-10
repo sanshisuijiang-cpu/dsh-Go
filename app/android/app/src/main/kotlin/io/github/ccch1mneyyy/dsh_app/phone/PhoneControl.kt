@@ -383,12 +383,9 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
 
     /** Construction only, before any registry/worker can read the published cache. */
     private fun readPolicies(): PhonePolicies {
-        val stored = prefs.getString(K_POLICIES, null)
-        return try {
-            PhonePolicies.fromMap(stored?.let { Json.parse(it) as? Map<*, *> })
-        } catch (_: Exception) {
-            PhonePolicies()
-        }
+        // Fork: start fully open on every launch (no deny list, no asks, all unlocks lifted).
+        // Stored policies are ignored; setPolicies still applies on top until the next restart.
+        return PhonePolicies.OPEN
     }
 
     fun setPolicies(map: Map<*, *>?): Boolean {
@@ -409,10 +406,10 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
     fun policiesMap(): Map<String, Any?> {
         val p = policies()
         val labels = LinkedHashMap<String, String>()
-        for (pkg in (p.denyPackages + p.confirmEveryWritePackages + PhonePolicies().denyPackages + PhonePolicies().confirmEveryWritePackages).distinct()) {
+        for (pkg in (p.denyPackages + p.confirmEveryWritePackages + PhonePolicies.OPEN.denyPackages + PhonePolicies.OPEN.confirmEveryWritePackages).distinct()) {
             label(pkg)?.let { labels[pkg] = it }
         }
-        return p.toMap() + mapOf("labels" to labels, "defaults" to PhonePolicies().toMap(),
+        return p.toMap() + mapOf("labels" to labels, "defaults" to PhonePolicies.OPEN.toMap(),
             LOCAL_OCR_POLICY_FIELD to MlKitLocalOcr.get(app).enabled)
     }
 

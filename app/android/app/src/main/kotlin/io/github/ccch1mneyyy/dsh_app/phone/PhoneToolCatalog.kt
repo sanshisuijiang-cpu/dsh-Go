@@ -153,12 +153,12 @@ object PhoneToolCatalog {
         Tool(
             SCREEN,
             // l10n:keep agent tool catalog
-            "读当前屏幕：每行一个元素，[编号] 只在本屏有效。detail:true 附坐标，结果可能截断；image:true 请求截图，安全或能力限制时可能不附图（主屏可带编号，后台图不带编号）；background:true 读后台屏。元素少或为空不表示页面安全；本机文字识别不可用时按回话提示处理，无法核对目标就 handoff。",
+            "读当前屏幕：每行一个元素，[编号] 只在本屏有效。detail:true 附坐标，结果可能截断；image:true 请求截图（主屏可带编号，后台图不带编号）；background:true 读后台屏。本机文字识别不可用时按回话提示处理。",
             linkedMapOf(
                 // l10n:keep agent tool catalog
                 "detail" to bool("附上已返回元素的坐标，不保证完整页面"),
                 // l10n:keep agent tool catalog
-                "image" to bool("请求附带截图；可能因安全或能力限制省略"),
+                "image" to bool("请求附带截图"),
                 // l10n:keep agent tool catalog
                 "background" to bool("读后台屏（不打扰模式）"),
             ),
@@ -182,7 +182,7 @@ object PhoneToolCatalog {
         Tool(
             TAP,
             // l10n:keep agent tool catalog
-            "点一个元素，返回新屏幕。敏感按钮或首次操作该 App 会先请用户确认。",
+            "点一个元素，返回新屏幕。",
             // l10n:keep agent tool catalog
             linkedMapOf("screen" to SCREEN_ID, "id" to int("元素编号"), "long" to bool("长按")),
             listOf("screen", "id"),
@@ -190,7 +190,7 @@ object PhoneToolCatalog {
         Tool(
             TYPE,
             // l10n:keep agent tool catalog
-            "在输入框输入文字（替换原内容），返回回读和新屏幕。submit:true 后按回车 / 发送，要确认。密码、验证码、支付框默认拒绝，被拒绝就 handoff。",
+            "在输入框输入文字（替换原内容），返回回读和新屏幕。submit:true 后按回车 / 发送。",
             linkedMapOf(
                 "screen" to SCREEN_ID,
                 // l10n:keep agent tool catalog
@@ -226,7 +226,7 @@ object PhoneToolCatalog {
         Tool(
             TAP_XY,
             // l10n:keep agent tool catalog
-            "按本任务最近一次实际返回截图的像素坐标操作，只在元素里找不到目标时用。action 默认为 tap；long 长按；swipe 从 (x,y) 滑到 (x2,y2)。主屏用 s 号、后台屏用 b 号；截图超过 30 秒或上下文核对失败要重读。每张图只供一次坐标手势；需通过安全检查与所需用户确认，长按和滑动仍逐次确认。结果可报告画面变化，但不表示目标业务成功；结果未知或未变化先读屏，不自动重试。",
+            "按本任务最近一次实际返回截图的像素坐标操作，只在元素里找不到目标时用。action 默认为 tap；long 长按；swipe 从 (x,y) 滑到 (x2,y2)。主屏用 s 号、后台屏用 b 号；截图超过 30 秒或上下文核对失败要重读。每张图只供一次坐标手势。结果可报告画面变化，但不表示目标业务成功；结果未知或未变化先读屏，不自动重试。",
             linkedMapOf(
                 // l10n:keep agent tool catalog
                 "observation" to str("本任务最近一次实际返回截图的屏幕号（主屏 s 号或后台屏 b 号）"),

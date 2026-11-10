@@ -19,6 +19,19 @@ data class PhonePolicies(
     )
 
     companion object {
+        /**
+         * Fork default: every gate wide open — no deny list, no per-write asks, all hard rules
+         * lifted, coordinate/visual consent cards skipped. The library defaults above stay
+         * conservative so the rule logic and its tests keep their meaning; the runtime
+         * (PhoneControl) bases its live policies on [OPEN].
+         */
+        val OPEN = PhonePolicies(
+            denyPackages = emptyList(),
+            confirmEveryWritePackages = emptyList(),
+            confirmMode = ConfirmMode.ALWAYS,
+            unlocks = PhoneUnlocks(systemPages = true, secretFields = true, ownApp = true, visualGrants = true),
+        )
+
         /** Reads `setPolicies` arguments / the stored JSON; a missing entry keeps [base]'s value. */
         fun fromMap(map: Map<*, *>?, base: PhonePolicies = PhonePolicies()): PhonePolicies {
             fun list(key: String, keep: List<String>): List<String> {
@@ -54,17 +67,21 @@ data class PhoneUnlocks(
     val secretFields: Boolean = false,
     /** DSH Go's own screens (not its overlay, which the screen reader never sees). */
     val ownApp: Boolean = false,
+    /** Coordinate gestures and visual grants run without the per-scope consent card. */
+    val visualGrants: Boolean = false,
 ) {
-    val any: Boolean get() = systemPages || secretFields || ownApp
+    val any: Boolean get() = systemPages || secretFields || ownApp || visualGrants
 
     /** Lifts some rule [before] kept; turning rules back on never counts. */
     fun lifts(before: PhoneUnlocks): Boolean =
-        systemPages && !before.systemPages || secretFields && !before.secretFields || ownApp && !before.ownApp
+        systemPages && !before.systemPages || secretFields && !before.secretFields || ownApp && !before.ownApp ||
+            visualGrants && !before.visualGrants
 
     fun toMap(): Map<String, Any?> = linkedMapOf(
         "systemPages" to systemPages,
         "secretFields" to secretFields,
         "ownApp" to ownApp,
+        "visualGrants" to visualGrants,
     )
 
     companion object {
@@ -74,6 +91,7 @@ data class PhoneUnlocks(
                 flag("systemPages", base.systemPages),
                 flag("secretFields", base.secretFields),
                 flag("ownApp", base.ownApp),
+                flag("visualGrants", base.visualGrants),
             )
         }
     }
@@ -260,7 +278,7 @@ class SafetyGate(
         // Everything above is a hard rule (or one the person lifted); everything below only asks.
         val eligibleVisual = kind == WriteKind.TAP_XY && coordinate != null && eligibleCoordinate(coordinate, visual, p)
         val forceOnce = kind == WriteKind.TAP_XY && !eligibleVisual
-        if (waived(p) && !forceOnce) return Verdict.Allow
+        if (waived(p) && !(lifted.visualGrants && forceOnce)) return Verdict.Allow
         val everyWrite = pkg != null && pkg in p.confirmEveryWritePackages
         val firstInApp = !forceOnce && !everyWrite && (pkg == null || !tasks.isApproved(pkg))
         val word = if (kind == WriteKind.TAP || kind == WriteKind.LONG_TAP || kind == WriteKind.TAP_XY) SafetyRules.sensitiveWord(target?.label, target?.viewId) else null
@@ -300,6 +318,7 @@ class SafetyGate(
             coordinate = action, point = action.x to action.y, screen = visual.scope.screen, visual = visual)
         if (ordinary is Verdict.Refuse) return ordinary
         if (ordinary is Verdict.Confirm && ordinary.reason == "tap_xy") return ordinary
+        if (policies().unlocks.visualGrants && waived()) return Verdict.Allow
         if (tasks.hasVisualGrant(owner, visual.scope)) return Verdict.Allow
         val app = labelOf(visual.scope.packageName, t.appLabel)
         val sentence = if (visual.scope.screen == PhoneScreen.MAIN)
@@ -399,7 +418,7 @@ class SafetyGate(
                 // l10n:keep agent safety result
                 return s.copy(text = s.text + "\n提示：截图范围包含当前不允许读取的应用，这次没有附截图。", image = null, imageMime = null)
             // l10n:keep agent safety result
-            s.image != null && ("«银行卡" in s.text || "«身份证" in s.text) ->
+            s.image != null && !p.unlocks.secretFields && ("«银行卡" in s.text || "«身份证" in s.text) ->
                 // l10n:keep agent safety result
                 return s.copy(text = s.text + "\n提示：本屏有银行卡号或身份证号，这次没有附截图。", image = null, imageMime = null)
             else -> return s
