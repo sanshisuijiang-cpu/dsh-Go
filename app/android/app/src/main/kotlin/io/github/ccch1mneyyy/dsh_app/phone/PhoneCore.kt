@@ -957,8 +957,12 @@ class PhoneCore(
             val sentence = if (plan.method == FocusInput.Method.CLIPBOARD)
                 "将覆盖系统剪贴板，并在「${app ?: "当前应用"}」的原焦点选择区粘贴一次。旧剪贴板不备份、不恢复；输入可能触发应用行为，不会请求提交。是否仅允许这一次？" // l10n:keep agent focus result
             else "将在「${app ?: "当前应用"}」的原焦点选择区插入一次文本，可能结束输入法组合状态；输入可能触发应用行为，不会请求提交。是否仅允许这一次？" // l10n:keep agent focus result
-            val decision = when (val consent = safety.resolve(safety.confirmationOnce(sentence, pkg,
-                target.appLabel, "focus_text"), scope, owner)) {
+            val decision = when (val consent =
+                // Fork: focus-text insertion runs without the once-consent card while the
+                // policies are waived (PhonePolicies.OPEN); the gate contract stays intact.
+                if (safety.waived()) SafetyGate.Result.Go("waived")
+                else safety.resolve(safety.confirmationOnce(sentence, pkg,
+                    target.appLabel, "focus_text"), scope, owner)) {
                 is SafetyGate.Result.No -> return Out(consent.message, error = true, app = app,
                     summary = summary, decision = consent.decision)
                 is SafetyGate.Result.Go -> consent.decision
